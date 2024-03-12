@@ -2,47 +2,44 @@ import { authenticate_post } from './pkg';
 
 
 async function main() {
+    //init();
     await authenticate_post(
-        "at://did:plc:nna2tjuxqm6e5kaie5iul42e/app.bsky.feed.post/3kmntv5eutc2c",
-        "bafyreidk5kuawhnzmyf3ma6vqhwpmzsbd6rbbzr3d5j7z2t5wqo33nvoya",
+        "at://did:web:genco.me/app.bsky.feed.post/3kmncrcuaus2o",
+        "bafyreiau7hjyomncwrab5nvbsxah2bza4dsip6cjkek5x4wyer4i3kfkkm",
         {
-            "text":"New blog! \"BGGP4: A 420 Byte Self-Replicating UEFI App For x64\"\n\nI cover UEFI, the UEFI x64 ABI, writing UEFI applications in x86_64 assembly, Tianocore EDK2 image loader internals, QEMU automation, and binary golf strategies for UEFI PEs.\n\nHappy Friday!\n\ngithub.com/netspooky/go...",
+            "text":"and commits from prs 500",
             "$type":"app.bsky.feed.post",
             "embed":{
                 "$type":"app.bsky.embed.images",
-                "images":[
-                    {
-                        "alt":"A screenshot of a terminal with a hex dump of a UEFI app, the size (420 bytes), and the app running in QEMU.",
-                        "image":{
-                            "ref":{
-                                "$link":"bafkreibvfwoz6zfm7q4zrgxonmzzp7wlsmbih7wznjcsejw7mcjm5hq5oi"
-                            },
-                            "size":425919,
-                            "$type":"blob",
-                            "mimeType":"image/jpeg"
+                "images":[{
+                    "alt":"",
+                    "image":{
+                        "$type":"blob",
+                        "ref":{
+                            "$link":"bafkreibje2n6qeeduvypr4hui7jdg4w6eabdjbhraespepxcaa5icsgflu"
                         },
-                        "aspectRatio":{"width":528,"height":520}
+                        "mimeType":"image/jpeg",
+                        "size":325395
+                    },
+                    "aspectRatio":{
+                        "width":2000,
+                        "height":1214
                     }
-                ]
+                }]
             },
             "langs":["en"],
-            "facets":[
-                {
-                    "index":
-                        {
-                            "byteEnd":282,
-                            "byteStart":256
-                        },
-                    "features":[
-                        {
-                            "uri":"https://github.com/netspooky/golfclub/tree/master/uefi/bggp4",
-                            "$type":"app.bsky.richtext.facet#link"
-                        }
-                    ]
+            "reply":{
+                "root":{
+                    "cid":"bafyreifsv6rjzhjoni4bn775v7l7m5kia5ukzg6qphkalf3c526ifospcy",
+                    "uri":"at://did:web:genco.me/app.bsky.feed.post/3kmncq7o3rc2o"
+                },
+                "parent":{
+                    "cid":"bafyreifsv6rjzhjoni4bn775v7l7m5kia5ukzg6qphkalf3c526ifospcy",
+                    "uri":"at://did:web:genco.me/app.bsky.feed.post/3kmncq7o3rc2o"
                 }
-            ],
-            "createdAt":"2024-03-01T19:34:17.532Z"
-        }
+            },
+            "createdAt":"2024-03-01T14:27:55.445Z"
+        },
     );
 }
 

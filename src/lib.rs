@@ -1,3 +1,4 @@
+mod ipld_transcode;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::ops::Add;
@@ -11,38 +12,34 @@ use web_sys::js_sys::Uint8Array;
 use sha2::Digest;
 use futures_util::stream::StreamExt;
 use k256::ecdsa::signature::Verifier as k256Verifier;
-use libipld::Cid;
+use cid::Cid;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Deserialize, Debug)]
 pub struct DNSJsonAnswer {
-    name: String,
-    r#type: u16,
-    #[serde(rename="TTL")]
-    ttl: u16,
     data: String
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Deserialize, Debug)]
 pub struct DNSJsonResponse {
     pub error: Option<String>,
     #[serde(rename="Answer")]
     pub answer: Option<Vec<DNSJsonAnswer>>
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Deserialize, Debug)]
 pub struct DidVerificationMethod {
     pub id: String,
     #[serde(rename="publicKeyMultibase")]
     pub public_key_multibase: String
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Deserialize, Debug)]
 pub struct DidDocument {
     #[serde(rename="verificationMethod")]
     pub verification_method: Option<Vec<DidVerificationMethod>>
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Deserialize, Debug)]
 pub struct SignedCommitObject<'a> {
     did: String,
     version: u16,
@@ -52,7 +49,7 @@ pub struct SignedCommitObject<'a> {
     sig: &'a [u8]
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Debug)]
 pub struct UnsignedCommitObject {
     did: String,
     rev: String,
@@ -61,7 +58,7 @@ pub struct UnsignedCommitObject {
     version: u16
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Deserialize, Debug)]
 pub struct IPLDEntry {
     p: u32,
     k: String,
@@ -69,7 +66,7 @@ pub struct IPLDEntry {
     t: Option<Cid>
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Deserialize, Debug)]
 pub struct IPLDNode {
     l: Option<Cid>,
     e: Vec<IPLDEntry>
@@ -82,7 +79,7 @@ struct DFSState {
     depth: Option<u32>
 }
 
-fn dfs(tree: &HashMap<Cid, Vec<u8>>, visited: &mut HashSet<Cid>, start: Option<Cid>, target: Cid) -> Result<DFSState, JsValue> {
+fn dfs(tree: &HashMap<Vec<u8>, Vec<u8>>, visited: &mut HashSet<Cid>, start: Option<Cid>, target: Cid) -> Result<DFSState, JsValue> {
     let start = match start {
         Some(cid) => cid,
         None => {
@@ -98,7 +95,7 @@ fn dfs(tree: &HashMap<Cid, Vec<u8>>, visited: &mut HashSet<Cid>, start: Option<C
         panic!("this tree is not a tree?");
     }
     visited.insert(start.clone());
-    let block = match tree.get(&start) {
+    let block = match tree.get(&start.to_bytes()) {
         Some(block) => block,
         None => {
             return Ok(DFSState {
@@ -209,21 +206,31 @@ pub async fn authenticate_post(uri: &str, cid: &str, record: JsValue) -> Result<
         return Err("unexpected cid type".into());
     }
 
-    /* disabled until i can get serde_ipld_dagcbor (or something else) to serialize into real dag-cbor
+
     let deserializer = serde_wasm_bindgen::Deserializer::from(record);
     let writer = serde_ipld_dagcbor::ser::BufWriter::new(Vec::new());
     let mut serializer = serde_ipld_dagcbor::ser::Serializer::new(writer);
-    serde_transcode::transcode(deserializer, &mut serializer).unwrap();
+    ipld_transcode::transcode(deserializer, &mut serializer).unwrap();
 
     let cbor_writer = serializer.into_inner();
     let cbor = cbor_writer.buffer();
+    let mut cbor_buf = Vec::<u8>::new();
 
-    let record_hash = sha2::Sha256::digest(cbor);
+    let mut i = 0;
+    while i < cbor.len() {
+        if cbor.len() >= i+7 && cbor[i..i+7] == [0xa1, 0x65, 0x24, 0x6c, 0x69, 0x6e, 0x6b] {
+            i += 7;
+            continue;
+        }
+        cbor_buf.push(cbor[i]);
+        i += 1;
+    }
+
+    let record_hash = sha2::Sha256::digest(&cbor_buf);
 
     if &hash_digest[..32] != record_hash.as_slice() {
-        return Err(format!("given cid doesn't match given record, {:?}", cbor).into());
+        return Err(format!("given cid doesn't match given record, {:?}", cbor_buf).into());
     }
-     */
 
     if &uri[..5] != "at://" {
         return Err("invalid record uri".into());
@@ -265,7 +272,7 @@ pub async fn authenticate_post(uri: &str, cid: &str, record: JsValue) -> Result<
     let header = car_reader.header().clone();
     let mut stream = Box::pin(car_reader.stream());
 
-    let mut blocks: HashMap<Cid, Vec<u8>> = HashMap::new();
+    let mut blocks: HashMap<Vec<u8>, Vec<u8>> = HashMap::new();
 
     while let Some(block) = stream.next().await {
         let (cid, cbor) = block.unwrap();
@@ -279,7 +286,7 @@ pub async fn authenticate_post(uri: &str, cid: &str, record: JsValue) -> Result<
         if &hash_digest[..32] != record_hash.as_slice() {
             return Err("a cid in the car doesn't match its record".into());
         }
-        blocks.insert(cid, cbor);
+        blocks.insert(cid.to_bytes(), cbor);
     }
 
     let signing_key = get_signing_key(parts[0]).await?;
@@ -290,7 +297,7 @@ pub async fn authenticate_post(uri: &str, cid: &str, record: JsValue) -> Result<
     let mut car_found = false;
 
     for root in header.roots() {
-        let block_data = blocks.get(root).unwrap();
+        let block_data = blocks.get(&root.to_bytes()).unwrap();
         let root_object: SignedCommitObject = serde_ipld_dagcbor::from_slice(block_data).unwrap();
         if root_object.did != parts[0] {
             return Err("did from car doesn't match did from uri".into());
@@ -435,3 +442,12 @@ pub async fn get_signing_key(did: &str) -> Result<String, JsValue> {
 
     Err("couldn't find signing key".into())
 }
+/*
+extern crate console_error_panic_hook;
+use std::panic;
+
+#[wasm_bindgen]
+pub fn init() {
+    panic::set_hook(Box::new(console_error_panic_hook::hook));
+}
+ */

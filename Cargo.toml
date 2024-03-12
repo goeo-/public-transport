@@ -9,13 +9,17 @@ crate-type = ["cdylib"]
 
 [dependencies]
 wasm-bindgen = { version = "0.2.91", features = ["serde-serialize"] }
-
 wasm-bindgen-futures = { version = "0.4.41" }
+futures-util = "0.3.30"
+#console_error_panic_hook = "0.1.7"
 
 serde = { version = "1.0", features = ["derive"] }
 serde-wasm-bindgen = "0.6.5"
-serde_ipld_dagcbor = "0.4.2"
-serde-transcode = "1.1.1"
+
+libipld = "0.16.0"
+cid = { version = "0.11.0", default-features = false, features = ["serde-codec"] }
+iroh-car = "0.4.0"
+serde_ipld_dagcbor = { git = "https://github.com/ipld/serde_ipld_dagcbor.git", branch = "serde-transcode" }
 
 ecdsa = { version = "0.13.4", features = ["arithmetic", "der", "verify"] }
 elliptic-curve = { version = "0.13.8", features = ["arithmetic"]}
@@ -23,16 +27,10 @@ k256 = { version = "0.13.3", features = ["ecdsa", "arithmetic"] }
 p256 = "0.13.2"
 getrandom = { version = "0.2", features = ["js"] }
 sha2 = "0.10.8"
-libipld = "0.16.0"
-iroh-car = "0.4.0"
-futures-util = "0.3.30"
 
 [dependencies.web-sys]
 version = "0.3.68"
 features = ["Headers", "Request", "RequestInit", "RequestMode", "Response", "Window", "console"]
-
-#[patch.crates-io]
-#serde_ipld_dagcbor = { path = "./serde_ipld_dagcbor" }
 
 [profile.release]
 # Tell `rustc` to optimize for small code size.

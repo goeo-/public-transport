@@ -11,27 +11,41 @@ crate-type = ["cdylib"]
 wasm-bindgen = { version = "0.2.91", features = ["serde-serialize"] }
 wasm-bindgen-futures = { version = "0.4.41" }
 futures-util = "0.3.30"
-#console_error_panic_hook = "0.1.7"
+console_error_panic_hook = "0.1.7"
+console_log = "1.0.0"
 
 serde = { version = "1.0", features = ["derive"] }
 serde-wasm-bindgen = "0.6.5"
+serde_bytes = "0.11"
 
 libipld = "0.16.0"
-cid = { version = "0.11.0", default-features = false, features = ["serde-codec"] }
+cid = { version = "0.11.0", default-features = false, features = [
+    "serde-codec",
+] }
 iroh-car = "0.4.0"
-serde_ipld_dagcbor = { git = "https://github.com/ipld/serde_ipld_dagcbor.git", branch = "serde-transcode" }
+serde_ipld_dagcbor = { git = "https://github.com/ipld/serde_ipld_dagcbor.git" }
 
 ecdsa = { version = "0.13.4", features = ["arithmetic", "der", "verify"] }
-elliptic-curve = { version = "0.13.8", features = ["arithmetic"]}
+elliptic-curve = { version = "0.13.8", features = ["arithmetic"] }
 k256 = { version = "0.13.3", features = ["ecdsa", "arithmetic"] }
 p256 = "0.13.2"
 getrandom = { version = "0.2", features = ["js"] }
 sha2 = "0.10.8"
+log = "0.4.22"
 
 [dependencies.web-sys]
 version = "0.3.68"
-features = ["Headers", "Request", "RequestInit", "RequestMode", "Response", "Window", "console"]
+features = [
+    "Headers",
+    "Request",
+    "RequestInit",
+    "RequestMode",
+    "Response",
+    "Window",
+    "console",
+]
 
 [profile.release]
 # Tell `rustc` to optimize for small code size.
+lto = true
 opt-level = "s"

@@ -1,42 +1,69 @@
 mod ipld_transcode;
+use cid::Cid;
+use futures_util::stream::StreamExt;
+use k256::ecdsa::signature::Verifier as k256Verifier;
+use serde::{Deserialize, Serialize};
+use sha2::Digest;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::ops::Add;
 use std::str::FromStr;
-use serde::{Deserialize, Serialize};
-use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen::prelude::*;
+use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{Request, RequestInit, RequestMode, Response};
 use web_sys::js_sys::Uint8Array;
-use sha2::Digest;
-use futures_util::stream::StreamExt;
-use k256::ecdsa::signature::Verifier as k256Verifier;
-use cid::Cid;
+use web_sys::{Request, RequestInit, RequestMode, Response};
 
 #[derive(Deserialize, Debug)]
-pub struct DNSJsonAnswer {
-    data: String
-}
-
-#[derive(Deserialize, Debug)]
-pub struct DNSJsonResponse {
-    pub error: Option<String>,
-    #[serde(rename="Answer")]
-    pub answer: Option<Vec<DNSJsonAnswer>>
-}
-
-#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct DidVerificationMethod {
     pub id: String,
-    #[serde(rename="publicKeyMultibase")]
-    pub public_key_multibase: String
+    pub public_key_multibase: String,
 }
 
 #[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct DidService {
+    pub id: String,
+    pub r#type: String,
+    pub service_endpoint: String,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct DidDocument {
-    #[serde(rename="verificationMethod")]
-    pub verification_method: Option<Vec<DidVerificationMethod>>
+    pub id: String,
+    pub service: Option<Vec<DidService>>,
+    pub verification_method: Option<Vec<DidVerificationMethod>>,
+}
+
+impl DidDocument {
+    pub fn get_pds(&self) -> Result<&str, JsValue> {
+        if let Some(ref service) = self.service {
+            for s in service {
+                if s.id == "#atproto_pds" && s.r#type == "AtprotoPersonalDataServer" {
+                    return Ok(s.service_endpoint.as_str());
+                }
+            }
+        } else {
+            return Err("no service in did document".into());
+        }
+
+        Err("couldn't find pds".into())
+    }
+    pub fn get_signing_key(&self) -> Result<&str, JsValue> {
+        if let Some(ref verification_methods) = self.verification_method {
+            for method in verification_methods {
+                if method.id == format!("{}#atproto", self.id) {
+                    return Ok(method.public_key_multibase.as_str());
+                }
+            }
+        } else {
+            return Err("no verification method in did document".into());
+        }
+
+        Err("couldn't find signing key".into())
+    }
 }
 
 #[derive(Deserialize, Debug)]
@@ -46,7 +73,7 @@ pub struct SignedCommitObject<'a> {
     data: Cid,
     rev: String,
     prev: Option<Cid>,
-    sig: &'a [u8]
+    sig: &'a [u8],
 }
 
 #[derive(Serialize, Debug)]
@@ -55,7 +82,7 @@ pub struct UnsignedCommitObject {
     rev: String,
     data: Cid,
     prev: Option<Cid>,
-    version: u16
+    version: u16,
 }
 
 #[derive(Deserialize, Debug)]
@@ -63,23 +90,28 @@ pub struct IPLDEntry {
     p: u32,
     k: String,
     v: Cid,
-    t: Option<Cid>
+    t: Option<Cid>,
 }
 
 #[derive(Deserialize, Debug)]
 pub struct IPLDNode {
     l: Option<Cid>,
-    e: Vec<IPLDEntry>
+    e: Vec<IPLDEntry>,
 }
 
 struct DFSState {
     found: bool,
     min: Option<String>,
     max: Option<String>,
-    depth: Option<u32>
+    depth: Option<u32>,
 }
 
-fn dfs(tree: &HashMap<Vec<u8>, Vec<u8>>, visited: &mut HashSet<Cid>, start: Option<Cid>, target: Cid) -> Result<DFSState, JsValue> {
+fn dfs(
+    tree: &HashMap<Vec<u8>, Vec<u8>>,
+    visited: &mut HashSet<Cid>,
+    start: Option<Cid>,
+    target: Cid,
+) -> Result<DFSState, JsValue> {
     let start = match start {
         Some(cid) => cid,
         None => {
@@ -87,14 +119,14 @@ fn dfs(tree: &HashMap<Vec<u8>, Vec<u8>>, visited: &mut HashSet<Cid>, start: Opti
                 found: false,
                 min: None,
                 max: None,
-                depth: None
+                depth: None,
             });
         }
     };
     if visited.contains(&start) {
         panic!("this tree is not a tree?");
     }
-    visited.insert(start.clone());
+    visited.insert(start);
     let block = match tree.get(&start.to_bytes()) {
         Some(block) => block,
         None => {
@@ -102,7 +134,7 @@ fn dfs(tree: &HashMap<Vec<u8>, Vec<u8>>, visited: &mut HashSet<Cid>, start: Opti
                 found: false,
                 min: None,
                 max: None,
-                depth: None
+                depth: None,
             });
         }
     };
@@ -145,7 +177,7 @@ fn dfs(tree: &HashMap<Vec<u8>, Vec<u8>>, visited: &mut HashSet<Cid>, start: Opti
             }
         }
 
-        if let None = last_key {
+        if last_key.is_none() {
             first_key = Some(key.clone());
             last_key = Some(key.clone());
         }
@@ -177,7 +209,7 @@ fn dfs(tree: &HashMap<Vec<u8>, Vec<u8>>, visited: &mut HashSet<Cid>, start: Opti
 
         last_key = match right_state.max {
             Some(key) => Some(key),
-            None => Some(key.clone())
+            None => Some(key.clone()),
         };
     }
 
@@ -193,19 +225,25 @@ fn dfs(tree: &HashMap<Vec<u8>, Vec<u8>>, visited: &mut HashSet<Cid>, start: Opti
         found,
         min: first_key,
         max: last_key,
-        depth
+        depth,
     })
 }
 
 #[wasm_bindgen]
-pub async fn authenticate_post(uri: &str, cid: &str, record: JsValue) -> Result<(), JsValue> {
-    let cid = Cid::from_str(cid).unwrap();
+pub async fn authenticate_post_with_doc(
+    uri: &str,
+    cid: &str,
+    record: JsValue,
+    did_doc: JsValue,
+) -> Result<(), JsValue> {
+    let did_doc: DidDocument = serde_wasm_bindgen::from_value(did_doc)?;
+
+    let cid = Cid::from_str(cid).expect("couldn't parse given cid");
     let (hash_type, hash_digest, hash_len) = cid.hash().into_inner();
 
     if hash_type != 0x12 || hash_len != 0x20 {
         return Err("unexpected cid type".into());
     }
-
 
     let deserializer = serde_wasm_bindgen::Deserializer::from(record);
     let writer = serde_ipld_dagcbor::ser::BufWriter::new(Vec::new());
@@ -214,22 +252,17 @@ pub async fn authenticate_post(uri: &str, cid: &str, record: JsValue) -> Result<
 
     let cbor_writer = serializer.into_inner();
     let cbor = cbor_writer.buffer();
-    let mut cbor_buf = Vec::<u8>::new();
 
-    let mut i = 0;
-    while i < cbor.len() {
-        if cbor.len() >= i+7 && cbor[i..i+7] == [0xa1, 0x65, 0x24, 0x6c, 0x69, 0x6e, 0x6b] {
-            i += 7;
-            continue;
-        }
-        cbor_buf.push(cbor[i]);
-        i += 1;
-    }
-
-    let record_hash = sha2::Sha256::digest(&cbor_buf);
+    let record_hash = sha2::Sha256::digest(cbor);
 
     if &hash_digest[..32] != record_hash.as_slice() {
-        return Err(format!("given cid doesn't match given record, {:?}", cbor_buf).into());
+        return Err(format!(
+            "given cid doesn't match given record, {:?} != {:?}, {:?}",
+            &hash_digest[..32],
+            &record_hash.as_slice(),
+            cbor
+        )
+        .into());
     }
 
     if &uri[..5] != "at://" {
@@ -241,15 +274,22 @@ pub async fn authenticate_post(uri: &str, cid: &str, record: JsValue) -> Result<
         return Err("invalid record uri".into());
     }
 
-    let mut opts = RequestInit::new();
-    opts.method("GET");
-    opts.mode(RequestMode::Cors);
+    if parts[0] != did_doc.id {
+        return Err("record uri did doesn't match did doc id".into());
+    }
+
+    let opts = RequestInit::new();
+    opts.set_method("GET");
+    opts.set_mode(RequestMode::Cors);
 
     let window = web_sys::window().unwrap();
 
     let url = format!(
-        "https://bsky.network/xrpc/com.atproto.sync.getRecord?did={}&collection={}&rkey={}",
-        parts[0], parts[1], parts[2]
+        "{}/xrpc/com.atproto.sync.getRecord?did={}&collection={}&rkey={}",
+        did_doc.get_pds()?,
+        parts[0],
+        parts[1],
+        parts[2]
     );
     let request = Request::new_with_str_and_init(&url, &opts)?;
 
@@ -264,7 +304,7 @@ pub async fn authenticate_post(uri: &str, cid: &str, record: JsValue) -> Result<
     let bytes = array.to_vec();
 
     let car_reader = iroh_car::CarReader::new(bytes.as_slice()).await;
-    if let Err(_) = car_reader {
+    if car_reader.is_err() {
         return Err("Failed to decode CAR".into());
     }
 
@@ -289,7 +329,7 @@ pub async fn authenticate_post(uri: &str, cid: &str, record: JsValue) -> Result<
         blocks.insert(cid.to_bytes(), cbor);
     }
 
-    let signing_key = get_signing_key(parts[0]).await?;
+    let signing_key = did_doc.get_signing_key()?;
     let (_, signing_key) = libipld::multibase::decode(signing_key).unwrap();
 
     let mut visited: HashSet<Cid> = HashSet::new();
@@ -302,12 +342,12 @@ pub async fn authenticate_post(uri: &str, cid: &str, record: JsValue) -> Result<
         if root_object.did != parts[0] {
             return Err("did from car doesn't match did from uri".into());
         }
-        let unsigned_object = UnsignedCommitObject{
+        let unsigned_object = UnsignedCommitObject {
             did: root_object.did,
             version: root_object.version,
             data: root_object.data,
             rev: root_object.rev,
-            prev: root_object.prev
+            prev: root_object.prev,
         };
         let data_signed = serde_ipld_dagcbor::to_vec(&unsigned_object).unwrap();
 
@@ -319,18 +359,22 @@ pub async fn authenticate_post(uri: &str, cid: &str, record: JsValue) -> Result<
 
         let result = match signing_key[..2] {
             [0xe7, 0x01] => {
-                let pub_key = k256::ecdsa::VerifyingKey::from_sec1_bytes(&signing_key[2..]).unwrap();
+                let pub_key =
+                    k256::ecdsa::VerifyingKey::from_sec1_bytes(&signing_key[2..]).unwrap();
                 let signature = k256::ecdsa::Signature::from_scalars(sc_r, sc_s).unwrap();
                 pub_key.verify(&data_signed, &signature)
-            },
+            }
             [0x80, 0x24] => {
-                let pub_key = p256::ecdsa::VerifyingKey::from_sec1_bytes(&signing_key[2..]).unwrap();
+                let pub_key =
+                    p256::ecdsa::VerifyingKey::from_sec1_bytes(&signing_key[2..]).unwrap();
                 let signature = p256::ecdsa::Signature::from_scalars(sc_r, sc_s).unwrap();
                 pub_key.verify(&data_signed, &signature)
-            },
-            _ => {return Err("unknown signing key format".into());}
+            }
+            _ => {
+                return Err("unknown signing key format".into());
+            }
         };
-        if let Err(_) = result {
+        if result.is_err() {
             return Err("signature not verified".into());
         }
 
@@ -338,83 +382,35 @@ pub async fn authenticate_post(uri: &str, cid: &str, record: JsValue) -> Result<
         car_found = car_found || res.found;
     }
 
-    if !car_found{
+    if !car_found {
         return Err("could not find cid in signed roots".into());
     }
-    return Ok(())
+
+    Ok(())
 }
 
 #[wasm_bindgen]
-pub async fn resolve_handle(handle: &str) -> Result<String, JsValue> {
-    let mut opts = RequestInit::new();
-    opts.method("GET");
-    opts.mode(RequestMode::Cors);
-
-    let window = web_sys::window().unwrap();
-
-    let url = format!("https://1.1.1.1/dns-query?name=_atproto.{handle}&type=TXT");
-    let request = Request::new_with_str_and_init(&url, &opts)?;
-    request
-        .headers()
-        .set("Accept", "application/dns-json")?;
-
-    let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
-    if !resp_value.is_instance_of::<Response>() {
-        return Err("could not get response".into());
-    }
-    let resp: Response = resp_value.dyn_into().unwrap();
-
-    let json = JsFuture::from(resp.json()?).await?;
-    let parsed: DNSJsonResponse = serde_wasm_bindgen::from_value(json)?;
-
-    if let Some(error) = parsed.error {
-        panic!("dns failed with error: {}", error);
-    }
-    else if let Some(answer) = parsed.answer {
-        if answer.len() >= 1 {
-            let data_len = &answer[0].data.len();
-            if &answer[0].data[..9] != "\"did=did:" {
-                return Err("got invalid data from dns while resolving did".into());
-            }
-            return Ok(String::from(&answer[0].data[5..data_len-1]));
-        }
+pub async fn authenticate_post(uri: &str, cid: &str, record: JsValue) -> Result<(), JsValue> {
+    let parts: Vec<&str> = uri[5..].split('/').collect();
+    if parts.len() != 3 {
+        return Err("invalid record uri".into());
     }
 
-    let mut opts = RequestInit::new();
-    opts.method("GET");
-    opts.mode(RequestMode::Cors);
+    let did_doc = get_did_doc(parts[0]).await?;
 
-    let url = format!("https://{handle}/.well-known/atproto-did");
-    let request = Request::new_with_str_and_init(&url, &opts)?;
-    let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
-
-
-    if !resp_value.is_instance_of::<Response>() {
-        return Err("could not get response".into());
-    }
-    let resp: Response = resp_value.dyn_into().unwrap();
-    let resp_text = JsFuture::from(resp.text()?).await?;
-
-    let out = resp_text.as_string().unwrap();
-    if &out[..4] != "did:" {
-        return Err("can't resolve user".into())
-    }
-    Ok(out)
+    authenticate_post_with_doc(uri, cid, record, did_doc).await
 }
 
-#[wasm_bindgen]
-pub async fn get_signing_key(did: &str) -> Result<String, JsValue> {
+async fn get_did_doc(did: &str) -> Result<JsValue, JsValue> {
     let url = match &did[..8] {
         "did:plc:" => format!("https://plc.directory/{did}"),
         "did:web:" => format!("https://{}/.well-known/did.json", &did[8..]),
-        _ => {
-            return Err("invalid did".into())
-        }
+        _ => return Err("invalid did".into()),
     };
 
-    let mut opts = RequestInit::new();
-    opts.method("GET");
-    opts.mode(RequestMode::Cors);
+    let opts = RequestInit::new();
+    opts.set_method("GET");
+    opts.set_mode(RequestMode::Cors);
 
     let window = web_sys::window().unwrap();
 
@@ -426,28 +422,14 @@ pub async fn get_signing_key(did: &str) -> Result<String, JsValue> {
     }
     let resp: Response = resp_value.dyn_into().unwrap();
 
-    let json = JsFuture::from(resp.json()?).await?;
-    let parsed: DidDocument = serde_wasm_bindgen::from_value(json)?;
-
-    if let Some(verification_methods) = parsed.verification_method {
-        for method in verification_methods {
-            if method.id == format!("{did}#atproto") {
-                return Ok(method.public_key_multibase);
-            }
-        }
-    }
-    else {
-        return Err("no verification method in did document".into())
-    }
-
-    Err("couldn't find signing key".into())
+    Ok(JsFuture::from(resp.json()?).await?)
 }
-/*
-extern crate console_error_panic_hook;
-use std::panic;
 
 #[wasm_bindgen]
 pub fn init() {
-    panic::set_hook(Box::new(console_error_panic_hook::hook));
+    extern crate console_error_panic_hook;
+
+    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+    console_log::init_with_level(log::Level::Debug).unwrap();
+    log::info!("initialized with logging");
 }
- */
